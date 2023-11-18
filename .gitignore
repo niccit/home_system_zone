@@ -1,0 +1,13 @@
+# created by virtualenv automatically
+data.py
+mqtt_data.py
+settings.toml
+pyvenv.cfg
+system_data.py
+alarm_state.txt
+excludes.txt
+my_alarm_info.txt
+adafruit_libs/
+bin/
+lib/
+.idea/
