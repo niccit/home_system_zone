@@ -13,11 +13,12 @@ import microcontroller
 import neopixel
 import wifi
 import watchdog
+import microcontroller as mc
 import socketpool
 import displayio
 import local_logger as logger
-import time_lord as my_time
 import alarm_handler as my_alarm
+import time_lord
 import one_mqtt
 import siren
 import zone
@@ -25,6 +26,7 @@ from adafruit_debouncer import Debouncer
 from adafruit_io.adafruit_io_errors import AdafruitIO_MQTTError
 from watchdog import WatchDogMode
 from microcontroller import watchdog as apollo
+from adafruit_pcf8523.pcf8523 import PCF8523
 
 # Replacement brains for circa 1987 home security system
 # The system has 8 zones
@@ -49,19 +51,23 @@ except ImportError:
 # Network
 pool = socketpool.SocketPool(wifi.radio)
 
-# Watchdog
-watchdog_timeout = data["watchdog_timeout"]
-apollo.timeout = watchdog_timeout
+# Set up I2C
+# Used for RTC
+i2c = busio.I2C(board.SCL, board.SDA)
+rtc = PCF8523(i2c)
 
+# Timey wimey
+my_time = time_lord.configure_time(pool, rtc)
 
 # Logging
 logger.initialize_storage()
 my_log = logger.getLocalLogger()
 my_log.add_sd_stream()
 
-# Timey wimey stuff
-# Gets current date from ntp and sets the RTC
-my_time.set_up_system_time(pool)
+# Watchdog
+watchdog_timeout = data["watchdog_timeout"]
+apollo.timeout = watchdog_timeout
+apollo.mode = WatchDogMode.RESET
 
 # Colors for NeoPixel
 RED = 0xF00000
@@ -253,15 +259,9 @@ async def dismiss_siren(controls, siren_controls):
 
 async def maintain_watchdog():
     watchdog_sleep = watchdog_timeout / 2
-    my_log.log_message("will sleep for " + str(watchdog_sleep), "info")
     while True:
-        apollo.mode = WatchDogMode.RAISE
-        while True:
-            try:
-                apollo.feed()
-            except watchdog.WatchDogTimeout:
-                microcontroller.reset()
-            await asyncio.sleep(watchdog_sleep)
+        apollo.feed()
+        await asyncio.sleep(watchdog_sleep)
 
 
 # --- On Start Setup Tasks --- #
@@ -278,6 +278,7 @@ my_siren = siren.getSiren()
 
 # Set up alarm state and exclusions lists
 # Source of truth is retained on the system
+my_alarm.set_alarm_prime()
 my_alarm.set_alarm_state()
 my_alarm.set_zone_exclusions()
 
