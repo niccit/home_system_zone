@@ -17,7 +17,7 @@ import adafruit_logging as a_logger
 
 from adafruit_logging import FileHandler, NOTSET, Handler, LogRecord
 import one_mqtt
-import time_lord as my_time
+import time_lord
 
 the_log = None
 handlers = []
@@ -108,7 +108,7 @@ class LocalLogger:
             self._the_log.addHandler(self.file_handler)
             handlers.append(self.file_handler)
         else:
-            the_log.log_message("unable to add sd stream", "warning")
+            self._the_log.log(get_log_level("warning"), "unable to add sd stream")
 
     # Flush the file_handler stream to SD
     def flush_sd_stream(self):
@@ -117,7 +117,7 @@ class LocalLogger:
                 self.file_handler.stream.flush()
             except OSError as oe:
                 message = "could not flush FileHandler to disk, SD card may be corrupted! " + str(oe)
-                the_log.log_message(message, "error")
+                self._the_log.log(get_log_level("error"), message)
                 pass
 
     # Close the sd card handler and remove it from the logger
@@ -152,6 +152,8 @@ class LocalLogger:
     # If notset is passed with mqtt then the level will be set to info; this is so things don't crash
     def log_message(self, message, level: str = "notset", mqtt: bool = False, sdcard_dump: bool = False):
 
+        my_time = time_lord.get_time_lord()
+
         if mqtt is True:
             if level is "notset" or sdcard_dump is True:
                 level = "info"
@@ -164,14 +166,14 @@ class LocalLogger:
                 self._the_log.log(get_log_level(level), json.dumps(io_message))
             except OSError as oe:
                 message = "MQTT logging failed, " + str(oe)
-                the_log.log_message(message, "error")
+                self._the_log.log(get_log_level("error"),message)
                 pass
         else:
             try:
                 self._the_log.log(get_log_level(level), my_time.get_logging_datetime() + ": " + message)
             except OSError as oe:
                 message = "Console/SD logging failed, " + str(oe)
-                the_log.log_message(message, "error")
+                self._the_log.log(get_log_level("error"), message)
                 pass
 
         # Remove MQTT handler
