@@ -10,20 +10,15 @@ import one_mqtt
 
 main_siren = None
 siren_cache = {}
-my_log = None
-my_mqtt = None
 
 
 def _addSiren():
-    global main_siren, my_log, my_mqtt
-
-    my_log = logger.getLocalLogger()
-    my_mqtt = one_mqtt.getMqtt()
+    global main_siren
 
     if main_siren is None:
         main_siren = Siren()
         log_message = "Created Siren singleton"
-        my_log.log_message(log_message, "info")
+        main_siren.my_log.log_message(log_message, "info")
 
 
 # Create or retrieve a siren object by name; only retrieves siren objects created using this function.
@@ -39,7 +34,7 @@ try:
     from system_data import system_data
 except ImportError:
     message = "System data must be in system_data.py, please create file"
-    my_log.log_message(message, "critical")
+    print(message)
     raise
 
 
@@ -52,6 +47,8 @@ class Siren:
         self.pin = None
         self.feed = system_data["siren_feed_name"]
         self.state = True  # Off
+        self.my_log = logger.getLocalLogger()  # Get the logger singleton here to avoid startup timing conflicts
+        self.my_mqtt = one_mqtt.getMqtt()  # Get the MQTT singleton here to avoid startup timing conflicts
 
     # Return the siren state
     def get_siren_state(self):
@@ -61,7 +58,7 @@ class Siren:
     def yelp(self):
         self.name = "yelp"
         log_message = "Siren " + str(self.name) + " triggered"
-        my_mqtt.publish(my_mqtt.gen_topic, log_message, "warning", True)
+        self.my_mqtt.publish(self.my_mqtt.gen_topic, log_message, "warning", True)
         if self.name not in siren_cache:
             Alarm.__create_alarm(self, system_data["siren_yelp"])
         Alarm.__enable(self)
@@ -70,7 +67,7 @@ class Siren:
     def steady(self):
         self.name = "steady"
         log_message = "Siren " + str(self.name) + " triggered"
-        my_mqtt.publish(my_mqtt.gen_topic, log_message, "warning", True)
+        self.my_mqtt.publish(self.my_mqtt.gen_topic, log_message, "warning", True)
         if self.name not in siren_cache:
             Alarm.__create_alarm(self, system_data["siren_steady"])
         Alarm.__enable(self)
@@ -78,7 +75,7 @@ class Siren:
     # Disable active siren
     def disable(self):
         log_message = "Siren " + str(self.name) + " disabled"
-        my_mqtt.publish(my_mqtt.gen_topic, log_message, "info", True)
+        self.my_mqtt.publish(self.my_mqtt.gen_topic, log_message, "info", True)
         if self.state is False:
             self.state = True
             self.pin.value = True
