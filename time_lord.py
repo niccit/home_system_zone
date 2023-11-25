@@ -1,13 +1,8 @@
 # SPDX-License-Identifier: MIT
 
 import time
-
-import adafruit_logging
-import board
-import busio
 import adafruit_ntp
 import local_logger as logger
-from adafruit_pcf8523.pcf8523 import PCF8523
 
 try:
     from data import data
@@ -15,95 +10,109 @@ except ImportError:
     print("Timezone data is stored in data.py. Please create the file")
     raise
 
-# Set up I2C
-# Used for RTC
-i2c = busio.I2C(board.SCL, board.SDA)
-rtc = PCF8523(i2c)
-
-# Set up NTP client so we can set the board time
-ntp_client = adafruit_ntp.NTP
-rtc_set = False
 
 # Logging
-my_log = adafruit_logging.Logger
+# my_log = logger.the_log
+
+# The time singleton
+# No value until configured
+time_lord = None
 
 
-# Run this on startup only! Once the RTC is set use it
-def set_up_system_time(socket_pool):
-    global ntp_client, my_log
-
-    my_log = logger.getLocalLogger()
-
-    if rtc_set is False:
-        ntp_client = adafruit_ntp.NTP(socket_pool, tz_offset=float(data["tz_offset"]))
-        _set_rtc()
+# Configure the time singleton
+def configure_time(socket_pool, rtc):
+    _add_time_lord(socket_pool, rtc)
+    return time_lord
 
 
-# Get time from NTP and set the RTC on the board
-# This should only be called from set_up_system_time()
-def _set_rtc():
-    global rtc_set
+# Private method to create time singleton, if one is not already created
+def _add_time_lord(socketpool, rtc):
+    global time_lord, my_log
 
-    attempt = 0
-    connect_success = False
-
-    while connect_success is False:
-        try:
-            rtc.datetime = ntp_client.datetime
-            rtc_set = True
-            connect_success = True
-        except OSError as oe:
-            if attempt <= 5:
-                message = "failed to connect to NTP, retrying ..."
-                my_log.log_message(message, "warning")
-                attempt += 1
-                time.sleep(2)
-                pass
-            else:
-                message = "Tried " + str(attempt) + "times, could not connect to NTP: " + str(oe)
-                my_log.log_message(message, "critical")
-                raise
+    if time_lord is None:
+        time_lord = TimeLord(socketpool, rtc)
+        time_lord.set_system_clock()
+        my_log = logger.getLocalLogger()
+        message = "Created Time Singleton"
+        my_log.log_message(message, "info")
 
 
-# Return the current date/time for logging
-# Formatted: Y.D.M HH:MM:SS
-def get_logging_datetime():
-    now = rtc.datetime
-    t = "{:02d}.{:02d}.{:02d} {:02d}:{:02d}:{:02d}".format(now.tm_year, now.tm_mday, now.tm_mon, now.tm_hour,
-                                                           now.tm_min, now.tm_sec)
-    return t
-
-
-# Return the current date
-# Formatted: YDM
-def get_date(separator=None):
-    now = rtc.datetime
-    if separator is not None:
-        d = "{:02d}" + separator + "{:02d}" + separator + "{:02d}".format(now.tm_year, now.tm_mday, now.tm_mon)
+# Return the configured time singleton
+# Returns nothing if configure_time() hasn't already been called
+def get_time_lord():
+    if time_lord is not None:
+        return time_lord
     else:
-        d = "{:02d}{:02d}{:02d}".format(now.tm_year, now.tm_mday, now.tm_mon)
-
-    return d
-
-
-# Return the current time with seconds
-# Formatted: HH:MM:SS
-def get_time_seconds():
-    now = rtc.datetime
-    t = "{:02d}:{:02d}:{:02d}".format(now.tm_hour, now.tm_min, now.tm_sec)
-    return t
+        print("time singleton not configured!")
+        raise RuntimeError
 
 
-# Return the current time without seconds
-# Formatted: HH:MM
-def get_time():
-    now = rtc.datetime
-    t = "{:02d}:{:02d}".format(now.tm_hour, now.tm_min)
-    return t
+class TimeLord:
 
+    # Initialize the time singleton
+    def __init__(self, socketpool, rtc):
+        self.rtc = rtc
+        self.socket_pool = socketpool
 
-# Returns current datetime from the RTC
-# This method returns as a time.struct_time
-# Format (tm_year, tm_mon, tm_mday, tm_hour, tm_min, tm_sec, tm_wday, tm_yday, tm_isdst)
-def get_current_time():
-    return rtc.datetime
+    # Set up NTP client
+    # get the current datetime and set the RTC
+    def set_system_clock(self):
+
+        ntp_client = adafruit_ntp.NTP(self.socket_pool, tz_offset=float(data["tz_offset"]))
+        attempt = 0
+        connect_success = False
+
+        while connect_success is False:
+            try:
+                self.rtc.datetime = ntp_client.datetime
+                connect_success = True
+            except OSError as oe:
+                if attempt <= 5:
+                    message = "failed to connect to NTP, retrying ..."
+                    my_log.log_message(message, "warning")
+                    attempt += 1
+                    time.sleep(2)
+                    pass
+                else:
+                    message = "Tried " + str(attempt) + "times, could not connect to NTP: " + str(oe)
+                    my_log.log_message(message, "critical")
+                    raise RuntimeError
+
+    # Return the current date/time for logging
+    # Formatted: Y.D.M HH:MM:SS
+    def get_logging_datetime(self):
+        now = self.rtc.datetime
+        t = "{:02d}.{:02d}.{:02d} {:02d}:{:02d}:{:02d}".format(now.tm_year, now.tm_mday, now.tm_mon, now.tm_hour,
+                                                               now.tm_min, now.tm_sec)
+        return t
+
+    # Return the current date
+    # Formatted: YDM
+    def get_date(self, separator=None):
+        now = self.rtc.datetime
+        if separator is not None:
+            d = "{:02d}" + separator + "{:02d}" + separator + "{:02d}".format(now.tm_year, now.tm_mday, now.tm_mon)
+        else:
+            d = "{:02d}{:02d}{:02d}".format(now.tm_year, now.tm_mday, now.tm_mon)
+
+        return d
+
+    # Return the current time with seconds
+    # Formatted: HH:MM:SS
+    def get_time_seconds(self):
+        now = self.rtc.datetime
+        t = "{:02d}:{:02d}:{:02d}".format(now.tm_hour, now.tm_min, now.tm_sec)
+        return t
+
+    # Return the current time without seconds
+    # Formatted: HH:MM
+    def get_time(self):
+        now = self.rtc.datetime
+        t = "{:02d}:{:02d}".format(now.tm_hour, now.tm_min)
+        return t
+
+    # Returns current datetime from the RTC
+    # This method returns as a time.struct_time
+    # Format (tm_year, tm_mon, tm_mday, tm_hour, tm_min, tm_sec, tm_wday, tm_yday, tm_isdst)
+    def get_current_time(self):
+        return self.rtc.datetime
