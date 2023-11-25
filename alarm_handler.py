@@ -14,9 +14,9 @@ import one_mqtt
 
 alarm_set = None
 excludes = []
-my_log = logger.getLocalLogger()
-my_siren = siren.getSiren()
-my_mqtt = one_mqtt.getMqtt()
+alarm_prime = None
+my_siren = None
+my_mqtt = None
 
 try:
     from data import data
@@ -31,6 +31,16 @@ except ImportError:
     raise
 
 
+# Called to set the logger
+def set_alarm_prime():
+    global alarm_prime, my_mqtt, my_siren
+
+    if alarm_prime is None:
+        alarm_prime = Alarm()
+        my_siren = siren.getSiren()
+        my_mqtt = one_mqtt.getMqtt()
+
+
 # Called when the proper code is sent to the alarm IO feed
 # Depending on the alarm_set value will enable or disable the alarm state
 def manage_alarm(num):
@@ -38,7 +48,7 @@ def manage_alarm(num):
 
     ac = data["alarm_code"]
 
-    my_log.log_message("I was passed " + str(num), "debug")
+    alarm_prime.my_log.log_message("I was passed " + str(num), "debug")
     if len(num) <= 3:
         num = int(num)
     else:
@@ -50,18 +60,18 @@ def manage_alarm(num):
                 zone_name = "zone-" + orig_num[value]
                 excludes.append(zone_name)
                 _write_excludes(zone_name)
-        my_log.log_message("excludes is now " + str(excludes), "debug")
+        alarm_prime.my_log.log_message("excludes is now " + str(excludes), "debug")
 
     if alarm_set is None:
         current_state = _get_alarm_state()
     else:
         current_state = alarm_set
 
-    my_log.log_message("current state is " + str(current_state), "debug")
+    alarm_prime.my_log.log_message("current state is " + str(current_state), "debug")
     topic = my_mqtt.gen_topic
 
     if num == ac:
-        my_log.log_message("in setting alarm section!", "debug")
+        alarm_prime.my_log.log_message("in setting alarm section!", "debug")
         if current_state is False:
             open_zone = _check_for_open_zone()
             if open_zone[0] is True:
@@ -84,9 +94,8 @@ def manage_alarm(num):
         message = "Incorrect code, system state unchanged"
         my_mqtt.publish(topic, message, "warning")
 
-
-
 # --- Setters --- #
+
 
 # Done on system start up
 # alarm armed/disarmed state is stored on the system in the alarm_state.txt file
@@ -122,7 +131,7 @@ def set_zone_exclusions():
 
     e_file = "/sd/" + data["excluded_zones_file"]
     try:
-        my_log.log_message("file is " + str(os.stat(e_file)[6]) + " big", "debug")
+        alarm_prime.my_log.log_message("file is " + str(os.stat(e_file)[6]) + " big", "debug")
         if os.stat(e_file)[6] > 0:
             with open(e_file, 'r') as ex:
                 excludes.append(ex.read())
@@ -132,11 +141,10 @@ def set_zone_exclusions():
         ex.close()
         pass
 
-    my_log.log_message("excludes array is now " + str(excludes), "debug")
+    alarm_prime.my_log.log_message("excludes array is now " + str(excludes), "debug")
 
 
 # --- Getters --- #
-
 # Will read the alarm_state.txt file and return the value in the file
 # Will return the current state
 def get_alarm_state():
@@ -152,7 +160,7 @@ def get_exclusions():
 # If a code is sent with more numeral that the base code, the additional numeral identify zones to be excluded
 # when determining if the siren should sound
 def get_zone_exclusion_state(feed):
-    my_log.log_message("feed is " + str(feed), "debug")
+    alarm_prime.my_log.log_message("feed is " + str(feed), "debug")
     regex = re.compile("monitoring.")
     feed_array = regex.split(feed)
     topic = feed_array[1]
@@ -214,3 +222,9 @@ def _check_for_open_zone():
         return True, open_zones
     else:
         return False, ""
+
+
+# Create an alarm and get the logging singleton for it
+class Alarm:
+    def __init__(self):
+        self.my_log = logger.getLocalLogger()
