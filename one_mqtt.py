@@ -11,7 +11,6 @@ from adafruit_io.adafruit_io import IO_MQTT
 
 
 mqtt_prime = None  # The only MQTT client, we don't need multiple
-my_log = ""
 
 
 # Get logging level
@@ -31,15 +30,12 @@ def getMqtt():
 
 
 def _addMqtt():
-    global mqtt_prime, my_log
-
-    my_log = logger.getLocalLogger()
+    global mqtt_prime
 
     if mqtt_prime is None:
         mqtt_prime = MessageBroker()
-
         message = "Created MQTT singleton"
-        my_log.log_message(message, "info")
+        mqtt_prime.my_log.log_message(message, "info")
 
 
 # Return properly formatted topic
@@ -52,7 +48,7 @@ try:
     from mqtt_data import mqtt_data
 except ImportError:
     log_message = "MQTT data stored in mqtt_data.py, please create file"
-    my_log.log_message(log_message, "critical")
+    print(log_message)
     raise
 
 
@@ -73,6 +69,7 @@ class MessageBroker:
         self.io = None
         self.gen_feed = mqtt_data["primary_feed"]
         self.gen_topic = mqtt_data["username"] + "/feeds/" + self.gen_feed + "/json"
+        self.my_log = logger.getLocalLogger()
 
     # --- Getters --- #
 
@@ -102,15 +99,15 @@ class MessageBroker:
     # Publish to MQTT
     def publish(self, topic, io_message, log_level: str = "notset", add_sdcard: bool = False):
         if not self.mqtt_client.is_connected():
-            my_log.log_message("Need to connect to MQTT", "info")
+            self.my_log.log_message("Need to connect to MQTT", "info")
             self.connect()
 
         try:
-            my_log.add_mqtt_stream(topic)
-            my_log.log_message(io_message, log_level, mqtt=True)
+            self.my_log.add_mqtt_stream(topic)
+            self.my_log.log_message(io_message, log_level, mqtt=True)
         except OSError as oe:
             message = "Unable to publish to MQTT! " + str(oe)
-            my_log.log_message(message, "critical")
+            self.my_log.log_message(message, "critical")
             pass
 
 
