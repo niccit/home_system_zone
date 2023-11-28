@@ -11,3 +11,4 @@ adafruit_libs/
 bin/
 lib/
 .idea/
+circuitpy_helpers/
