@@ -1,13 +1,8 @@
 # SPDX-License-Identifier: MIT
-
-import digitalio
 import time
-import json
-import one_mqtt
+import digitalio
+import local_mqtt
 import local_logger as logger
-
-my_log = None
-my_mqtt = None
 
 zone_cache = {}
 all_zones = []
@@ -31,18 +26,15 @@ except ImportError:
 def _addZone(name, pin, feed, task) -> None:
     if name not in zone_cache:
         new_zone = Zone(pin, feed, name, task)
-        zone_cache[name] = new_zone
-        all_zones.append(zone_cache[name])
+        if name in ["zone_3", "zone_4"]:  # remove me before real life!
+            zone_cache[name] = new_zone
+            all_zones.append(zone_cache[name])
 
 
 # This is the method that's called
 # It will get all the zones to create from "zones" in the system_data.py file
 # It will return an array of zone objects
 def buildZones():
-    global my_log, my_mqtt
-
-    my_log = logger.getLocalLogger()
-    my_mqtt = one_mqtt.getMqtt()
 
     zone_list = system_data["zones"]
     for zone in range(len(zone_list)):
@@ -50,7 +42,7 @@ def buildZones():
         _addZone(tmp_zone[0], tmp_zone[1], tmp_zone[2], tmp_zone[3])
 
     message = "Done building security zones"
-    my_log.log_message(message, "info")
+    all_zones[0].my_log.log_message(message, "info")
     return all_zones
 
 
@@ -81,6 +73,8 @@ class Zone:
         self.previous_state_value = 0
         self.state_change = False
         self.on_startup = True
+        self.my_log = logger.getLocalLogger()
+        self.my_mqtt = local_mqtt.getMqtt()
 
     # --- Getters --- #
 
@@ -120,13 +114,13 @@ class Zone:
     # Log on initial start up and zone state changes only
     def report(self, log_level: str = "notset"):
 
-        if my_mqtt.get_io() is None:
-            my_log.log_message("MQTT is not initialized, bailing!", "critical")
-            print("mqtt not initialized!")
-            raise RuntimeError
+        if self.my_mqtt.get_io() is None:
+            log_message = "MQTT not initialized, will attempt to initialize"
+            self.my_log.log_message(log_message, "warning")
+            self.my_mqtt.connect()
 
         # Set the zone topic for logging
-        zone_topic = one_mqtt.get_formatted_topic(self.feed_name)
+        zone_topic = local_mqtt.get_formatted_topic(self.feed_name)
 
         # Set human readable values for zone states for logging
         if self.state_value is 1:
@@ -143,17 +137,13 @@ class Zone:
             gen_message = (str(self.name) + " state has changed from: " + str(self.previous_zone_state) + " to " +
                            str(zone_state))
 
-        start_message = "reporting on zones to mqtt"
-        end_message = "done reporting on zones to mqtt"
         # Report on zone and update attributes
         if self.get_state_change() is True or self.on_startup is True:
-            my_log.log_message(start_message, "debug")
-            my_mqtt.publish(zone_topic, zone_log_message, "notset")
+            self.my_mqtt.publish(zone_topic, zone_log_message, "notset")
             if self.get_state_change() is True and self.state_value == 1:
                 log_level = "warning"
-            my_mqtt.publish(my_mqtt.gen_topic, gen_message, log_level)
+            self.my_mqtt.publish(self.my_mqtt.gen_topic, gen_message, log_level)
             self.set_on_startup(False)
-            my_log.log_message(end_message, "debug")
 
         # update zone attributes
         self.previous_state_value = self.state_value
