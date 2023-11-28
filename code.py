@@ -1,32 +1,26 @@
 # SPDX-License-Identifier: MIT
-import json
 import os
 import time
 import board
-import busio
-import countio
-import digitalio
 import asyncio
 import ipaddress
 import keypad
-import microcontroller
 import neopixel
 import wifi
-import watchdog
-import microcontroller as mc
 import socketpool
-import displayio
-import local_logger as logger
-import alarm_handler as my_alarm
-import time_lord
-import one_mqtt
-import siren
-import zone
-from adafruit_debouncer import Debouncer
+import adafruit_sdcard
+import storage
 from adafruit_io.adafruit_io_errors import AdafruitIO_MQTTError
 from watchdog import WatchDogMode
 from microcontroller import watchdog as apollo
 from adafruit_pcf8523.pcf8523 import PCF8523
+from digitalio import DigitalInOut
+import time_lord
+import local_logger as logger
+import local_mqtt
+import alarm_handler
+import siren
+import zone
 
 # Replacement brains for circa 1987 home security system
 # The system has 8 zones
@@ -53,14 +47,25 @@ pool = socketpool.SocketPool(wifi.radio)
 
 # Set up I2C
 # Used for RTC
-i2c = busio.I2C(board.SCL, board.SDA)
+i2c = board.I2C()
 rtc = PCF8523(i2c)
 
 # Timey wimey
 my_time = time_lord.configure_time(pool, rtc)
 
 # Logging
-logger.initialize_storage()
+# Initialize SD storage
+try:
+    sd_cs = board.D33
+    spi = board.SPI()
+    cs = DigitalInOut(sd_cs)
+    sdcard = adafruit_sdcard.SDCard(spi, cs)
+    vfs = storage.VfsFat(sdcard)
+    storage.mount(vfs, "/sd")
+except OSError as oe:
+    message = "unable to initialize storage \r\n" + str(oe)
+    print(message)
+
 my_log = logger.getLocalLogger()
 my_log.add_sd_stream()
 
@@ -115,11 +120,9 @@ def connect_mqtt():
             log_message = "Couldn't connect to MQTT"
             my_log.log_message(log_message, "warning")
             if time.monotonic() >= wifi_connect_timeout + mqtt_retry_limit:
-                log_message = "Error: - " + str(ae) + " resetting microcontroller"
+                log_message = "Error: - " + str(ae) + " giving up"
                 my_log.log_message(log_message, "critical")
-                microcontroller.reset()
-                mqtt_connect_loop = False
-                pass
+                break
 
 
 # Return the zone object based on pin number
@@ -136,10 +139,10 @@ def message(client, topic, message):
     # Handle requests regarding zone changes
     # Handle triggering the alarm if the system is armed
     if "zone" in topic:
-        my_log.log_message("alarm state is " + str(my_alarm.get_alarm_state()), "debug")
+        my_log.log_message("alarm state is " + str(alarm_handler.get_alarm_state()), "debug")
         my_log.log_message("siren state is " + str(my_siren.state), "debug")
-        if message is "1" and my_alarm.get_alarm_state() is True:
-            if my_alarm.get_zone_exclusion_state(topic) is False:
+        if message is "1" and alarm_handler.get_alarm_state() is True:
+            if alarm_handler.get_zone_exclusion_state(topic) is False:
                 if my_siren.state is True:
                     my_siren.steady()
                 else:
@@ -155,26 +158,30 @@ def message(client, topic, message):
             # For security log a value of 0 to the alarm management feed
             # The feed is configured to only keep one line of data
             my_log.close_sd_stream()
-            my_log.add_mqtt_stream(one_mqtt.get_formatted_topic(data["alarm_management_feed_name"]))
-            my_log.log_message(0000, mqtt=True)
+            topic_name = local_mqtt.get_formatted_topic(data["alarm_management_feed_name"])
+            my_mqtt.publish(topic_name, 0)
             my_log.add_sd_stream()
 
     # Handle requests to get data from the system and state files on SD
     if "output" in topic:
-        if "sys" in message:
+        if "check" in message:
             my_log.log_message("Request to read sdcard log file", "info")
-            logger.dump_sd_log()
+            my_log.dump_sd_log(data["sd_logfile"], data["sd_logfile_lines_to_output"], mqtt=True)
         elif "restart" in message:
             my_log.log_message("Request to read sdcard log file after restart", "info")
-            logger.dump_sd_log(True)
+            my_log.dump_sd_log(data["sd_logfile"], data["sd_logfile_lines_to_output"], True, mqtt=True)
         elif "alarm" in message:
             my_log.log_message("Request to get system state from disk", "info")
-            logger.get_system_state()
-        elif "exclusion" in message:
+            return_data = my_log.read_file(data["alarm_state_file"])
+            for _ in range(len(return_data)):
+                my_log.log_message("Alarm state is " + str(return_data[_]), "info")
+        elif "exclu" in message:
             my_log.log_message("Request to get excluded zones from disk", "info")
-            logger.get_exclusions_list()
-        elif "dir" in message:
-            logger.list_sd_card()
+            return_data = my_log.read_file(data["excluded_zones_file"])
+            for _ in range(len(return_data)):
+                my_log.log_message("Excluded zone: " + str(return_data[_]) + "\r\n", "info")
+        else:
+            my_log.list_sd_card(message)
 
 
 # Behavior when connected to the MQTT broker
@@ -278,12 +285,12 @@ my_siren = siren.getSiren()
 
 # Set up alarm state and exclusions lists
 # Source of truth is retained on the system
-my_alarm.set_alarm_prime()
-my_alarm.set_alarm_state()
-my_alarm.set_zone_exclusions()
+my_alarm = alarm_handler.get_alarm_prime()
+alarm_handler.set_alarm_state()
+alarm_handler.set_zone_exclusions()
 
 # Set up MQTT for publish/subscribe
-my_mqtt = one_mqtt.getMqtt()
+my_mqtt = local_mqtt.getMqtt()
 my_mqtt.configure_publish(pool)
 my_mqtt.mqtt_client.on_message = message
 my_mqtt.mqtt_client.on_connect = connected
@@ -297,9 +304,9 @@ topics.append(data["alarm_management_feed_name"])
 connect_wifi()
 
 # If the MCU reset while the alarm was set we want to know about it
-if my_alarm.get_alarm_state() is True:
-    if len(my_alarm.get_exclusions()) > 0:
-        message = "System is armed with these zones excluded: " + str(my_alarm.get_exclusions())
+if alarm_handler.get_alarm_state() is True:
+    if len(alarm_handler.get_exclusions()) > 0:
+        message = "System is armed with these zones excluded: " + str(alarm_handler.get_exclusions())
     else:
         message = "System is armed with no zones excluded"
 
