@@ -3,10 +3,9 @@
 # This class will return a siren object
 # There is only one object, if your system has multiple sires you chance which siren triggered via set_siren()
 
-import board
 import digitalio
 import local_logger as logger
-import one_mqtt
+import local_mqtt
 
 main_siren = None
 siren_cache = {}
@@ -48,7 +47,7 @@ class Siren:
         self.feed = system_data["siren_feed_name"]
         self.state = True  # Off
         self.my_log = logger.getLocalLogger()  # Get the logger singleton here to avoid startup timing conflicts
-        self.my_mqtt = one_mqtt.getMqtt()  # Get the MQTT singleton here to avoid startup timing conflicts
+        self.my_mqtt = local_mqtt.getMqtt()  # Get the MQTT singleton here to avoid startup timing conflicts
 
     # Return the siren state
     def get_siren_state(self):
@@ -58,7 +57,7 @@ class Siren:
     def yelp(self):
         self.name = "yelp"
         log_message = "Siren " + str(self.name) + " triggered"
-        self.my_mqtt.publish(self.my_mqtt.gen_topic, log_message, "warning", True)
+        self.my_mqtt.publish(self.my_mqtt.gen_topic, log_message, "warning")
         if self.name not in siren_cache:
             Alarm.__create_alarm(self, system_data["siren_yelp"])
         Alarm.__enable(self)
@@ -67,7 +66,7 @@ class Siren:
     def steady(self):
         self.name = "steady"
         log_message = "Siren " + str(self.name) + " triggered"
-        self.my_mqtt.publish(self.my_mqtt.gen_topic, log_message, "warning", True)
+        self.my_mqtt.publish(self.my_mqtt.gen_topic, log_message, "warning")
         if self.name not in siren_cache:
             Alarm.__create_alarm(self, system_data["siren_steady"])
         Alarm.__enable(self)
@@ -75,7 +74,7 @@ class Siren:
     # Disable active siren
     def disable(self):
         log_message = "Siren " + str(self.name) + " disabled"
-        self.my_mqtt.publish(self.my_mqtt.gen_topic, log_message, "info", True)
+        self.my_mqtt.publish(self.my_mqtt.gen_topic, log_message, "info")
         if self.state is False:
             self.state = True
             self.pin.value = True
@@ -84,7 +83,6 @@ class Siren:
 # Creating and activating an alarm is private
 # It can only be accessed via yelp() or steady()
 class Alarm(Siren):
-
     def __create_alarm(self, pin):
         self.pin = digitalio.DigitalInOut(pin)
         self.pin.direction = digitalio.Direction.OUTPUT
@@ -94,7 +92,3 @@ class Alarm(Siren):
         if self.state is True:
             self.pin.value = False
             self.state = False
-
-
-
-
