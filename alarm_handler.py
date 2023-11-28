@@ -10,13 +10,11 @@ import os
 import local_logger as logger
 import siren
 import zone
-import one_mqtt
+import local_mqtt
 
 alarm_set = None
 excludes = []
 alarm_prime = None
-my_siren = None
-my_mqtt = None
 
 try:
     from data import data
@@ -33,66 +31,17 @@ except ImportError:
 
 # Called to set the logger
 def set_alarm_prime():
-    global alarm_prime, my_mqtt, my_siren
+    global alarm_prime
 
     if alarm_prime is None:
         alarm_prime = Alarm()
-        my_siren = siren.getSiren()
-        my_mqtt = one_mqtt.getMqtt()
 
 
-# Called when the proper code is sent to the alarm IO feed
-# Depending on the alarm_set value will enable or disable the alarm state
-def manage_alarm(num):
-    global alarm_set, excludes
-
-    ac = data["alarm_code"]
-
-    alarm_prime.my_log.log_message("I was passed " + str(num), "debug")
-    if len(num) <= 3:
-        num = int(num)
-    else:
-        orig_num = num
-        code = num[0] + num[1] + num[2] + num[3]
-        num = int(code)
-        for value in range(len(orig_num)):
-            if value > 3:
-                zone_name = "zone-" + orig_num[value]
-                excludes.append(zone_name)
-                _write_excludes(zone_name)
-        alarm_prime.my_log.log_message("excludes is now " + str(excludes), "debug")
-
-    if alarm_set is None:
-        current_state = _get_alarm_state()
-    else:
-        current_state = alarm_set
-
-    alarm_prime.my_log.log_message("current state is " + str(current_state), "debug")
-    topic = my_mqtt.gen_topic
-
-    if num == ac:
-        alarm_prime.my_log.log_message("in setting alarm section!", "debug")
-        if current_state is False:
-            open_zone = _check_for_open_zone()
-            if open_zone[0] is True:
-                message = "Cannot arm system; the following zone(s) are open: " + str(open_zone[1])
-                my_mqtt.publish(topic, message, "warning")
-            else:
-                alarm_set = True
-                _write_alarm_state("True")
-                message = "System armed"
-                my_mqtt.publish(topic, message, "info")
-        else:
-            alarm_set = False
-            if my_siren.get_siren_state() is False:
-                my_siren.disable()
-            _write_alarm_state("False")
-            _clear_excludes()
-            message = "System disarmed"
-            my_mqtt.publish(topic, message, "info")
-    else:
-        message = "Incorrect code, system state unchanged"
-        my_mqtt.publish(topic, message, "warning")
+# Get the alarm singleton
+def get_alarm_prime():
+    if alarm_prime is None:
+        set_alarm_prime()
+    return alarm_prime
 
 # --- Setters --- #
 
@@ -110,9 +59,8 @@ def set_alarm_state():
         alarm.close()
     except OSError:
         current_state = "False"
-        with open(a_file, 'w') as alarm:
-            alarm.write(current_state)
-        alarm.close()
+        af = open(a_file, 'w')
+        af.close()
         pass
 
     if current_state is "False":
@@ -131,7 +79,6 @@ def set_zone_exclusions():
 
     e_file = "/sd/" + data["excluded_zones_file"]
     try:
-        alarm_prime.my_log.log_message("file is " + str(os.stat(e_file)[6]) + " big", "debug")
         if os.stat(e_file)[6] > 0:
             with open(e_file, 'r') as ex:
                 excludes.append(ex.read())
@@ -140,8 +87,6 @@ def set_zone_exclusions():
         ex = open(e_file, 'w')
         ex.close()
         pass
-
-    alarm_prime.my_log.log_message("excludes array is now " + str(excludes), "debug")
 
 
 # --- Getters --- #
@@ -160,7 +105,6 @@ def get_exclusions():
 # If a code is sent with more numeral that the base code, the additional numeral identify zones to be excluded
 # when determining if the siren should sound
 def get_zone_exclusion_state(feed):
-    alarm_prime.my_log.log_message("feed is " + str(feed), "debug")
     regex = re.compile("monitoring.")
     feed_array = regex.split(feed)
     topic = feed_array[1]
@@ -228,3 +172,59 @@ def _check_for_open_zone():
 class Alarm:
     def __init__(self):
         self.my_log = logger.getLocalLogger()
+
+    # Called when the proper code is sent to the alarm IO feed
+    # Depending on the alarm_set value will enable or disable the alarm state
+    def manage_alarm(self, num):
+        global alarm_set, excludes
+
+        my_mqtt = local_mqtt.getMqtt()
+        my_siren = siren.getSiren()
+
+        ac = data["alarm_code"]
+
+        self.my_log.log_message("I was passed " + str(num), "debug")
+        if len(num) <= 3:
+            num = int(num)
+        else:
+            orig_num = num
+            code = num[0] + num[1] + num[2] + num[3]
+            num = int(code)
+            for value in range(len(orig_num)):
+                if value > 3:
+                    zone_name = "zone-" + orig_num[value]
+                    excludes.append(zone_name)
+                    _write_excludes(zone_name)
+            self.my_log.log_message("excludes is now " + str(excludes), "debug")
+
+        if alarm_set is None:
+            set_alarm_state()
+            current_state = alarm_set
+        else:
+            current_state = alarm_set
+
+        self.my_log.log_message("current state is " + str(current_state), "debug")
+        self.my_log.add_mqtt_stream(my_mqtt.gen_topic)
+        if num == ac:
+            self.my_log.log_message("in setting alarm section!", "debug")
+            if current_state is False:
+                open_zone = _check_for_open_zone()
+                if open_zone[0] is True:
+                    message = "Cannot arm system; the following zone(s) are open: " + str(open_zone[1])
+                    self.my_log.log_message(message, "info", mqtt=True)
+                else:
+                    alarm_set = True
+                    _write_alarm_state("True")
+                    message = "System armed"
+                    self.my_log.log_message(message, "info", mqtt=True)
+            else:
+                alarm_set = False
+                if my_siren.get_siren_state() is False:
+                    my_siren.disable()
+                _write_alarm_state("False")
+                _clear_excludes()
+                message = "System disarmed"
+                self.my_log.log_message(message, "info", mqtt=True)
+        else:
+            message = "Incorrect code, system state unchanged"
+            self.my_log.log_message(message, "warning", mqtt=True)
