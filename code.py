@@ -139,49 +139,52 @@ def message(client, topic, message):
     # Handle requests regarding zone changes
     # Handle triggering the alarm if the system is armed
     if "zone" in topic:
-        my_log.log_message("alarm state is " + str(alarm_handler.get_alarm_state()), "debug")
-        my_log.log_message("siren state is " + str(my_siren.state), "debug")
         if message is "1" and alarm_handler.get_alarm_state() is True:
             if alarm_handler.get_zone_exclusion_state(topic) is False:
                 if my_siren.state is True:
                     my_siren.steady()
                 else:
-                    my_log.log_message("sirens is already active", "info")
+                    msg = "sirens is already active"
+                    my_mqtt.publish(my_mqtt.gen_topic, msg, "info")
             else:
-                my_log.log_message("This " + str(topic) + " is in the exclude list", "info")
+                msg = "This " + str(topic) + " is in the exclude list"
+                my_mqtt.publish(my_mqtt.gen_topic, msg, "info")
 
     # Handle requests to enable/disable the alarm
     if "alarm" in topic:
+        topic_name = local_mqtt.get_formatted_topic(data["alarm_management_feed_name"])
         if message is not "0":
-            my_log.log_message("Request to arm/disarm system", "info")
-            my_alarm.manage_alarm(message)
+            msg = "Request to arm/disarm system"
+            my_mqtt.publish(my_mqtt.gen_topic, msg, "info")
+            alarm_msg = my_alarm.manage_alarm(message)
+            my_mqtt.publish(my_mqtt.gen_topic, str(alarm_msg[0]), str(alarm_msg[1]))
+            time.sleep(0.5)
             # For security log a value of 0 to the alarm management feed
             # The feed is configured to only keep one line of data
             my_log.close_sd_stream()
-            topic_name = local_mqtt.get_formatted_topic(data["alarm_management_feed_name"])
-            my_mqtt.publish(topic_name, 0)
-            my_log.add_sd_stream()
+            my_mqtt.publish(topic_name, "0", "info")
 
     # Handle requests to get data from the system and state files on SD
     if "output" in topic:
         if "check" in message:
             my_log.log_message("Request to read sdcard log file", "info")
-            my_log.dump_sd_log(data["sd_logfile"], data["sd_logfile_lines_to_output"], mqtt=True)
+            log_output = my_log.dump_sd_log(data["sd_logfile"], data["sd_logfile_lines_to_output"])
         elif "restart" in message:
             my_log.log_message("Request to read sdcard log file after restart", "info")
-            my_log.dump_sd_log(data["sd_logfile"], data["sd_logfile_lines_to_output"], True, mqtt=True)
+            log_output = my_log.dump_sd_log(data["sd_logfile"], data["sd_logfile_lines_to_output"], restart=True)
         elif "alarm" in message:
             my_log.log_message("Request to get system state from disk", "info")
-            return_data = my_log.read_file(data["alarm_state_file"])
-            for _ in range(len(return_data)):
-                my_log.log_message("Alarm state is " + str(return_data[_]), "info")
+            log_output = my_log.read_file(data["alarm_state_file"])
         elif "exclu" in message:
             my_log.log_message("Request to get excluded zones from disk", "info")
-            return_data = my_log.read_file(data["excluded_zones_file"])
-            for _ in range(len(return_data)):
-                my_log.log_message("Excluded zone: " + str(return_data[_]) + "\r\n", "info")
+            log_output = my_log.read_file(data["excluded_zones_file"])
         else:
-            my_log.list_sd_card(message)
+            my_log.log_message("Request to view contents of directory " + str(message), "info")
+            log_output = my_log.list_sd_card(message)
+
+        for _ in range(len(log_output)):
+            my_mqtt.publish(my_mqtt.gen_topic, str(log_output[_]), "info")
+            time.sleep(0.25)
 
 
 # Behavior when connected to the MQTT broker
