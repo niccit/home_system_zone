@@ -313,8 +313,7 @@ if alarm_handler.get_alarm_state() is True:
     else:
         message = "System is armed with no zones excluded"
 
-    my_log.add_mqtt_stream(my_mqtt.gen_topic)
-    my_log.log_message(message, "warning", mqtt=True)
+    my_mqtt.publish(my_mqtt.gen_topic, message, "warning")
 
 my_log.log_message("Ready to monitor", "info")
 
