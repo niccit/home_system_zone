@@ -43,6 +43,7 @@ def get_alarm_prime():
         set_alarm_prime()
     return alarm_prime
 
+
 # --- Setters --- #
 
 
@@ -178,12 +179,10 @@ class Alarm:
     def manage_alarm(self, num):
         global alarm_set, excludes
 
-        my_mqtt = local_mqtt.getMqtt()
         my_siren = siren.getSiren()
 
         ac = data["alarm_code"]
 
-        self.my_log.log_message("I was passed " + str(num), "debug")
         if len(num) <= 3:
             num = int(num)
         else:
@@ -195,7 +194,6 @@ class Alarm:
                     zone_name = "zone-" + orig_num[value]
                     excludes.append(zone_name)
                     _write_excludes(zone_name)
-            self.my_log.log_message("excludes is now " + str(excludes), "debug")
 
         if alarm_set is None:
             set_alarm_state()
@@ -204,19 +202,17 @@ class Alarm:
             current_state = alarm_set
 
         self.my_log.log_message("current state is " + str(current_state), "debug")
-        self.my_log.add_mqtt_stream(my_mqtt.gen_topic)
         if num == ac:
-            self.my_log.log_message("in setting alarm section!", "debug")
             if current_state is False:
                 open_zone = _check_for_open_zone()
                 if open_zone[0] is True:
                     message = "Cannot arm system; the following zone(s) are open: " + str(open_zone[1])
-                    self.my_log.log_message(message, "info", mqtt=True)
+                    level = "info"
                 else:
                     alarm_set = True
                     _write_alarm_state("True")
                     message = "System armed"
-                    self.my_log.log_message(message, "info", mqtt=True)
+                    level = "info"
             else:
                 alarm_set = False
                 if my_siren.get_siren_state() is False:
@@ -224,7 +220,9 @@ class Alarm:
                 _write_alarm_state("False")
                 _clear_excludes()
                 message = "System disarmed"
-                self.my_log.log_message(message, "info", mqtt=True)
+                level = "info"
         else:
             message = "Incorrect code, system state unchanged"
-            self.my_log.log_message(message, "warning", mqtt=True)
+            level = "warning"
+
+        return message, level
