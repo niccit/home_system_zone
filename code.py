@@ -158,11 +158,11 @@ def message(client, topic, message):
             my_mqtt.publish(my_mqtt.gen_topic, msg, "info")
             alarm_msg = my_alarm.manage_alarm(message)
             my_mqtt.publish(my_mqtt.gen_topic, str(alarm_msg[0]), str(alarm_msg[1]))
-            time.sleep(0.5)
+            time.sleep(1)
             # For security log a value of 0 to the alarm management feed
             # The feed is configured to only keep one line of data
             my_log.close_sd_stream()
-            my_mqtt.publish(topic_name, "0", "info")
+            my_mqtt.publish(topic_name, 0)
 
     # Handle requests to get data from the system and state files on SD
     if "output" in topic:
