@@ -23,9 +23,9 @@ except ImportError:
 
 
 # If a zone object does not already exist in the zone_cache, create it and append it the array of all zones
-def _addZone(name, pin, feed, task) -> None:
+def _addZone(name, pin, feed, task, mqtt) -> None:
     if name not in zone_cache:
-        new_zone = Zone(pin, feed, name, task)
+        new_zone = Zone(pin, feed, name, task, mqtt)
         if name in ["zone_3", "zone_4"]:  # remove me before real life!
             zone_cache[name] = new_zone
             all_zones.append(zone_cache[name])
@@ -34,12 +34,12 @@ def _addZone(name, pin, feed, task) -> None:
 # This is the method that's called
 # It will get all the zones to create from "zones" in the system_data.py file
 # It will return an array of zone objects
-def buildZones():
-
+def buildZones(mqtt: bool = False):
     zone_list = system_data["zones"]
     for zone in range(len(zone_list)):
         tmp_zone = zone_list[zone]
-        _addZone(tmp_zone[0], tmp_zone[1], tmp_zone[2], tmp_zone[3])
+        if tmp_zone[0] is "zone_4":
+            _addZone(tmp_zone[0], tmp_zone[1], tmp_zone[2], tmp_zone[3], mqtt)
 
     message = "Done building security zones"
     all_zones[0].my_log.log_message(message, "info")
@@ -60,7 +60,7 @@ class Zone:
     # Initial object has a previous state of False
     # Assigns the name that it is passed; useful for logging clarity
     # Should never be called directly, use buildZones() instead
-    def __init__(self, pin, feed_name, name, task):
+    def __init__(self, pin, feed_name, name, task, mqtt):
         self.pin = digitalio.DigitalInOut(pin)
         self.pin.direction = digitalio.Direction.INPUT
         self.pin.pull = digitalio.Pull.UP
@@ -73,8 +73,10 @@ class Zone:
         self.previous_state_value = 0
         self.state_change = False
         self.on_startup = True
+        self.mqtt = mqtt
         self.my_log = logger.getLocalLogger()
-        self.my_mqtt = local_mqtt.getMqtt()
+        if mqtt is True:
+            self.my_mqtt = local_mqtt.getMqtt(use_logger=True)
 
     # --- Getters --- #
 
@@ -114,7 +116,7 @@ class Zone:
     # Log on initial start up and zone state changes only
     def report(self, log_level: str = "notset"):
 
-        if self.my_mqtt.get_io() is None:
+        if self.mqtt is True and self.my_mqtt.get_io() is None:
             log_message = "MQTT not initialized, will attempt to initialize"
             self.my_log.log_message(log_message, "warning")
             self.my_mqtt.connect()
@@ -130,21 +132,32 @@ class Zone:
 
         zone_log_message = {"value": self.state_value}
 
-        # General logging message is different based on initial startup or state change
+        # Report on zone and update attributes
         if self.on_startup is True:
             gen_message = ("Publishing initial state for: " + str(self.name) + ": " + str(zone_state))
-        else:
+            self.print(zone_log_message, "notset", zone_topic)
+            self.print(message=gen_message, level=log_level)
+            self.set_on_startup(False)
+
+        if self.get_state_change() is True:
             gen_message = (str(self.name) + " state has changed from: " + str(self.previous_zone_state) + " to " +
                            str(zone_state))
 
-        # Report on zone and update attributes
-        if self.get_state_change() is True or self.on_startup is True:
-            self.my_mqtt.publish(zone_topic, zone_log_message, "notset")
-            if self.get_state_change() is True and self.state_value == 1:
+            if self.state_value == 1:
                 log_level = "warning"
-            self.my_mqtt.publish(self.my_mqtt.gen_topic, gen_message, log_level)
-            self.set_on_startup(False)
+            else:
+                log_level = "info"
+
+            self.print(message=gen_message, level=log_level)
 
         # update zone attributes
         self.previous_state_value = self.state_value
         self.previous_zone_state = zone_state
+
+    def print(self, message, level, topic=None):
+        if self.mqtt is True:
+            if topic is None:
+                self.my_mqtt.publish(topic, message, level)
+        else:
+            self.my_log.log_message(str(message), str(level))
+            # print(message)

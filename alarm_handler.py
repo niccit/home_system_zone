@@ -10,7 +10,6 @@ import os
 import local_logger as logger
 import siren
 import zone
-import local_mqtt
 
 alarm_set = None
 excludes = []
@@ -20,12 +19,6 @@ try:
     from data import data
 except ImportError:
     print("Alarm information stored in data.py, please create file")
-    raise
-
-try:
-    from mqtt_data import mqtt_data
-except ImportError:
-    print("MQTT username stored in mqtt_data.py, please create file")
     raise
 
 
@@ -60,8 +53,6 @@ def set_alarm_state():
         alarm.close()
     except OSError:
         current_state = "False"
-        af = open(a_file, 'w')
-        af.close()
         pass
 
     if current_state is "False":
@@ -85,8 +76,7 @@ def set_zone_exclusions():
                 excludes.append(ex.read())
             ex.close()
     except OSError:
-        ex = open(e_file, 'w')
-        ex.close()
+        print("No excluded zones")
         pass
 
 
@@ -129,17 +119,26 @@ def add_exclusion(name):
 # Private method
 # Will write the updated alarm state value to the alarm_state.txt file
 def _write_alarm_state(value):
-    a_file = "/sd/" + data["alarm_state_file"]
-    file = open(a_file, 'w')
-    file.write(value)
-    file.close()
+    try:
+        a_file = "/sd/" + data["alarm_state_file"]
+        file = open(a_file, 'w')
+        file.write(value)
+        file.close()
+    except OSError:
+        print("unable to create/write to file", data["alarm_state_file"])
+        pass
 
 
 # Private method
 # Adds excluded zones to the excludes.txt file
 def _write_excludes(name):
     e_file = "/sd/" + data["excluded_zones_file"]
-    file = open(e_file, 'a')
+    try:
+        file = open(e_file, 'a')
+    except OSError:
+        file = open(e_file, 'w')
+        pass
+
     file.write(name)
     file.close()
 

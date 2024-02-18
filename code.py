@@ -1,18 +1,22 @@
 # SPDX-License-Identifier: MIT
 import os
+import random
+import sys
 import time
 import board
 import asyncio
 import ipaddress
+import digitalio
 import keypad
+import microcontroller
+import watchdog
 import neopixel
 import wifi
 import socketpool
 import adafruit_sdcard
 import storage
+from adafruit_debouncer import Debouncer
 from adafruit_io.adafruit_io_errors import AdafruitIO_MQTTError
-from watchdog import WatchDogMode
-from microcontroller import watchdog as apollo
 from adafruit_pcf8523.pcf8523 import PCF8523
 from digitalio import DigitalInOut
 import time_lord
@@ -39,14 +43,12 @@ except ImportError:
     print("Configuration data stored in data.py, please create file")
     raise
 
-
 # --- Set up --- #
 
 # Network
 pool = socketpool.SocketPool(wifi.radio)
 
 # Set up I2C
-# Used for RTC
 i2c = board.I2C()
 rtc = PCF8523(i2c)
 
@@ -54,6 +56,12 @@ rtc = PCF8523(i2c)
 my_time = time_lord.configure_time(pool, rtc)
 
 # Logging
+my_log = logger.getLocalLogger(use_time=True)
+if my_log is not None:
+    my_log.log_message("Created logging singleton", "info")
+else:
+    print("Did not create logging singleton!")
+
 # Initialize SD storage
 try:
     sd_cs = board.D33
@@ -62,17 +70,47 @@ try:
     sdcard = adafruit_sdcard.SDCard(spi, cs)
     vfs = storage.VfsFat(sdcard)
     storage.mount(vfs, "/sd")
+
 except OSError as oe:
-    message = "unable to initialize storage \r\n" + str(oe)
+    message = "unable to initialize storage " + str(oe)
     print(message)
 
-my_log = logger.getLocalLogger()
-my_log.add_sd_stream()
+# If necessary, create files
+log_file = "/sd/" + data["sd_logfile"]
+try:
+    file = open(log_file, "r")
+    file.close()
+except OSError:
+    file = open(log_file, "w")
+    file.close()
+    pass
+
+alarm_file = "/sd/" + data["alarm_state_file"]
+try:
+    file = open(alarm_file, "r")
+    file.close()
+except OSError:
+    file = open(alarm_file, "w")
+    file.close()
+    pass
+
+exclude_file = "/sd/" + data["excluded_zones_file"]
+try:
+    file = open(exclude_file, "r")
+    file.close()
+except OSError:
+    file = open(exclude_file, "w")
+    file.close()
+    pass
+
+# Add the SD stream
+# my_log.add_sd_stream()
 
 # Watchdog
 watchdog_timeout = data["watchdog_timeout"]
+apollo = microcontroller.watchdog
 apollo.timeout = watchdog_timeout
-apollo.mode = WatchDogMode.RESET
+apollo.mode = watchdog.WatchDogMode.RAISE
 
 # Colors for NeoPixel
 RED = 0xF00000
@@ -84,9 +122,17 @@ OFF = 0X000000
 # On-board NeoPixel
 pixel_pin = neopixel.NeoPixel(board.NEOPIXEL, 1)
 
+# NeoKeys --- FOR TESTING ONLY
+panic_button_in = digitalio.DigitalInOut(board.D32)
+panic_button_in.pull = digitalio.Pull.UP
+panic_button = Debouncer(panic_button_in)
+silence_button_in = digitalio.DigitalInOut(board.D14)
+silence_button_in.pull = digitalio.Pull.UP
+silence_button = Debouncer(silence_button_in)
+
 
 # --- Helper Methods --- #
-# Connect to local WiFi
+# Connect to local Wi-Fi
 def connect_wifi():
     log_message = "Attempting to connect to network"
     my_log.log_message(log_message, "info")
@@ -98,8 +144,8 @@ def connect_wifi():
         ssid = wifi.radio.ap_info.ssid
         log_message = "Connected to " + ssid
         my_log.log_message(log_message, "debug")
-        connect_mqtt()
-        my_mqtt.publish(my_mqtt.gen_topic, log_message, "info")
+        # connect_mqtt()
+        # my_mqtt.publish(my_mqtt.gen_topic, log_message, "info")
     else:
         log_message = "Could not connect to network!"
         my_log.log_message(log_message, "critical")
@@ -126,10 +172,10 @@ def connect_mqtt():
 
 
 # Return the zone object based on pin number
-def get_zone_info(pin):
+def get_zone_info(z_pin):
     for p in range(len(patrol)):
         tmp_array = patrol[p]
-        if tmp_array.pinID is pin:
+        if tmp_array.pinID is z_pin:
             return tmp_array
 
 
@@ -161,7 +207,7 @@ def message(client, topic, message):
             time.sleep(1)
             # For security log a value of 0 to the alarm management feed
             # The feed is configured to only keep one line of data
-            my_log.close_sd_stream()
+            #            my_log.close_sd_stream()
             my_mqtt.publish(topic_name, 0)
 
     # Handle requests to get data from the system and state files on SD
@@ -219,21 +265,21 @@ class SirenControls:
 
 # Listen for button presses on the NeoKey FeatherWing
 # Disable Siren and Panic
-async def catch_key_transition(pin, controls, siren_controls):
-    with keypad.Keys((pin,), value_when_pressed=False) as keys:
-        while True:
-            event = keys.events.get()
-            if event:
-                if event.pressed:
-                    if pin is board.D14:
-                        if my_siren.state is False:
-                            my_siren.disable()
-                            if siren_controls.timer > 0:
-                                siren_controls.timer = 0
-                    if pin is board.D32:
-                        if my_siren.state is True:
-                            my_siren.steady()
-            await asyncio.sleep(controls.wait)
+# async def catch_key_transition(pin, controls, siren_controls):
+#     with keypad.Keys((pin,), value_when_pressed=False) as keys:
+#         while True:
+#             event = keys.events.get()
+#             if event:
+#                 if event.pressed:
+#                     if pin is board.D14:
+#                         if my_siren.state is False:
+#                             my_siren.disable()
+#                             if siren_controls.timer > 0:
+#                                 siren_controls.timer = 0
+#                     if pin is board.D32:
+#                         if my_siren.state is True:
+#                             my_siren.steady()
+#             await asyncio.sleep(controls.wait)
 
 
 # Continually check for changes in the security system zones
@@ -274,10 +320,60 @@ async def maintain_watchdog():
         await asyncio.sleep(watchdog_sleep)
 
 
+async def press_keys(siren_controls):
+    siren_timeout = data["siren_timeout"]
+    while True:
+        button_sleep = random.randrange(10, 30)
+        button_sleep = button_sleep
+        buttons = [panic_button, silence_button]
+        button_choice = random.randrange(0, 2)
+        button_to_press = buttons[button_choice]
+        button_to_press.state = 4
+        if button_to_press.fell:
+            if button_choice == 0:
+                if my_siren.state is True:
+                    my_siren.steady()
+        else:
+            if my_siren.state is False:
+                if siren_controls.timer >= siren_timeout:
+                    my_siren.disable()
+                    siren_controls.timer = 0
+                else:
+                    siren_controls.timer += 1
+
+        await asyncio.sleep(button_sleep)
+
+
+async def change_zone_state():
+    while True:
+        for _ in range(len(patrol)):
+            tmp = patrol[_]
+            tmp.pin.direction = digitalio.Direction.OUTPUT
+            tmp.pin.value = True
+        sleep_time = random.randrange(0, 10)
+        await asyncio.sleep(sleep_time)
+
+
+async def reset_pin_direction():
+    while True:
+        for _ in range(len(patrol)):
+            tmp = patrol[_]
+            tmp.pin.direction = digitalio.Direction.INPUT
+        sleep_time = random.randrange(5, 15)
+        await asyncio.sleep(sleep_time)
+
+
 # --- On Start Setup Tasks --- #
 
+# Set up MQTT for publish/subscribe
+# my_mqtt = local_mqtt.getMqtt(use_logger=True)
+# my_mqtt.configure_publish(pool)
+# my_mqtt.mqtt_client.on_message = message
+# my_mqtt.mqtt_client.on_connect = connected
+# my_mqtt.mqtt_client.on_disconnect = disconnected
+
 # Build Zone objects and append them to the patrol array
-patrol = zone.buildZones()
+patrol = zone.buildZones()  # use mqtt=True if using mqtt services
 topics = []
 for z in range(len(patrol)):
     topic_zone = patrol[z]
@@ -291,13 +387,6 @@ my_siren = siren.getSiren()
 my_alarm = alarm_handler.get_alarm_prime()
 alarm_handler.set_alarm_state()
 alarm_handler.set_zone_exclusions()
-
-# Set up MQTT for publish/subscribe
-my_mqtt = local_mqtt.getMqtt()
-my_mqtt.configure_publish(pool)
-my_mqtt.mqtt_client.on_message = message
-my_mqtt.mqtt_client.on_connect = connected
-my_mqtt.mqtt_client.on_disconnect = disconnected
 
 # Any additional topics for subscribing
 topics.append(data["sd_logfile_feed_name"])
@@ -313,7 +402,7 @@ if alarm_handler.get_alarm_state() is True:
     else:
         message = "System is armed with no zones excluded"
 
-    my_mqtt.publish(my_mqtt.gen_topic, message, "warning")
+#    my_mqtt.publish(my_mqtt.gen_topic, message, "warning")
 
 my_log.log_message("Ready to monitor", "info")
 
@@ -324,13 +413,6 @@ async def main():
     siren_controls = SirenControls()
     task_array = []
 
-    # Handle button presses from NeoKey FeatherWing
-    # Green = Silence siren
-    # Red = Panic button, enable siren
-    interrupt_task_silence = asyncio.create_task(catch_key_transition(board.D14, controls, siren_controls))
-    task_array.append(interrupt_task_silence)
-    interrupt_task_panic = asyncio.create_task(catch_key_transition(board.D32, controls, siren_controls))
-    task_array.append(interrupt_task_panic)
     # Handle changes for the security system zones
     # Build the tasks from the patrol array
     for _ in range(len(patrol)):
@@ -338,17 +420,28 @@ async def main():
         tmp.task = asyncio.create_task(catch_zone_changes(tmp.pinID, controls))
         task_array.append(tmp.task)
     # Listen for MQTT messages
-    mqtt_listener_task = asyncio.create_task(mqtt_listener(controls))
-    task_array.append(mqtt_listener_task)
+    # mqtt_listener_task = asyncio.create_task(mqtt_listener(controls))
+    # task_array.append(mqtt_listener_task)
     # If the siren is sounding turn it off after pre-defined period of time
     disable_siren_task = asyncio.create_task(dismiss_siren(controls, siren_controls))
     task_array.append(disable_siren_task)
-    # Enable the watchdog
-    watchdog_task = asyncio.create_task(maintain_watchdog())
-    task_array.append(watchdog_task)
+    # Feed the Watchdog
+    maintain_watchdog_task = asyncio.create_task(maintain_watchdog())
+    task_array.append(maintain_watchdog_task)
+    # TEST STUFF
+    state_change_task = asyncio.create_task(change_zone_state())
+    task_array.append(state_change_task)
+    reset_pin_task = asyncio.create_task(reset_pin_direction())
+    task_array.append(reset_pin_task)
+    press_keys_task = asyncio.create_task(press_keys(siren_controls))
+    task_array.append(press_keys_task)
 
     for _ in range(len(task_array)):
         await asyncio.gather(task_array[_])
 
 
-asyncio.run(main())
+try:
+    asyncio.run(main())
+except watchdog.WatchDogTimeout as w:
+    print("Error:", w)
+    microcontroller.reset()
