@@ -122,13 +122,14 @@ OFF = 0X000000
 # On-board NeoPixel
 pixel_pin = neopixel.NeoPixel(board.NEOPIXEL, 1)
 
+
 # NeoKeys --- FOR TESTING ONLY
-panic_button_in = digitalio.DigitalInOut(board.D32)
-panic_button_in.pull = digitalio.Pull.UP
-panic_button = Debouncer(panic_button_in)
-silence_button_in = digitalio.DigitalInOut(board.D14)
-silence_button_in.pull = digitalio.Pull.UP
-silence_button = Debouncer(silence_button_in)
+# panic_button_in = digitalio.DigitalInOut(board.D32)
+# panic_button_in.pull = digitalio.Pull.UP
+# panic_button = Debouncer(panic_button_in)
+# silence_button_in = digitalio.DigitalInOut(board.D14)
+# silence_button_in.pull = digitalio.Pull.UP
+# silence_button = Debouncer(silence_button_in)
 
 
 # --- Helper Methods --- #
@@ -144,8 +145,8 @@ def connect_wifi():
         ssid = wifi.radio.ap_info.ssid
         log_message = "Connected to " + ssid
         my_log.log_message(log_message, "debug")
-        # connect_mqtt()
-        # my_mqtt.publish(my_mqtt.gen_topic, log_message, "info")
+        connect_mqtt()
+        my_mqtt.publish(my_mqtt.gen_topic, log_message, "info")
     else:
         log_message = "Could not connect to network!"
         my_log.log_message(log_message, "critical")
@@ -265,21 +266,21 @@ class SirenControls:
 
 # Listen for button presses on the NeoKey FeatherWing
 # Disable Siren and Panic
-# async def catch_key_transition(pin, controls, siren_controls):
-#     with keypad.Keys((pin,), value_when_pressed=False) as keys:
-#         while True:
-#             event = keys.events.get()
-#             if event:
-#                 if event.pressed:
-#                     if pin is board.D14:
-#                         if my_siren.state is False:
-#                             my_siren.disable()
-#                             if siren_controls.timer > 0:
-#                                 siren_controls.timer = 0
-#                     if pin is board.D32:
-#                         if my_siren.state is True:
-#                             my_siren.steady()
-#             await asyncio.sleep(controls.wait)
+async def catch_key_transition(pin, controls, siren_controls):
+    with keypad.Keys((pin,), value_when_pressed=False) as keys:
+        while True:
+            event = keys.events.get()
+            if event:
+                if event.pressed:
+                    if pin is board.D14:
+                        if my_siren.state is False:
+                            my_siren.disable()
+                            if siren_controls.timer > 0:
+                                siren_controls.timer = 0
+                    if pin is board.D32:
+                        if my_siren.state is True:
+                            my_siren.steady()
+            await asyncio.sleep(controls.wait)
 
 
 # Continually check for changes in the security system zones
@@ -320,57 +321,61 @@ async def maintain_watchdog():
         await asyncio.sleep(watchdog_sleep)
 
 
-async def press_keys(siren_controls):
-    siren_timeout = data["siren_timeout"]
-    while True:
-        button_sleep = random.randrange(10, 30)
-        button_sleep = button_sleep
-        buttons = [panic_button, silence_button]
-        button_choice = random.randrange(0, 2)
-        button_to_press = buttons[button_choice]
-        button_to_press.state = 4
-        if button_to_press.fell:
-            if button_choice == 0:
-                if my_siren.state is True:
-                    my_siren.steady()
-        else:
-            if my_siren.state is False:
-                if siren_controls.timer >= siren_timeout:
-                    my_siren.disable()
-                    siren_controls.timer = 0
-                else:
-                    siren_controls.timer += 1
+# --- FOR TESTING ---#
 
-        await asyncio.sleep(button_sleep)
+# Automate key presses
+# async def press_keys(siren_controls):
+#     siren_timeout = data["siren_timeout"]
+#     while True:
+#         button_sleep = random.randrange(10, 30)
+#         button_sleep = button_sleep
+#         buttons = [panic_button, silence_button]
+#         button_choice = random.randrange(0, 2)
+#         button_to_press = buttons[button_choice]
+#         button_to_press.state = 4
+#         if button_to_press.fell:
+#             if button_choice == 0:
+#                 if my_siren.state is True:
+#                     my_siren.steady()
+#         else:
+#             if my_siren.state is False:
+#                 if siren_controls.timer >= siren_timeout:
+#                     my_siren.disable()
+#                     siren_controls.timer = 0
+#                 else:
+#                     siren_controls.timer += 1
+#
+#         await asyncio.sleep(button_sleep)
+
+# Automate change of testing zone, close to open
+# async def change_zone_state():
+#     while True:
+#         for _ in range(len(patrol)):
+#             tmp = patrol[_]
+#             tmp.pin.direction = digitalio.Direction.OUTPUT
+#             tmp.pin.value = True
+#         sleep_time = random.randrange(0, 10)
+#         await asyncio.sleep(sleep_time)
 
 
-async def change_zone_state():
-    while True:
-        for _ in range(len(patrol)):
-            tmp = patrol[_]
-            tmp.pin.direction = digitalio.Direction.OUTPUT
-            tmp.pin.value = True
-        sleep_time = random.randrange(0, 10)
-        await asyncio.sleep(sleep_time)
-
-
-async def reset_pin_direction():
-    while True:
-        for _ in range(len(patrol)):
-            tmp = patrol[_]
-            tmp.pin.direction = digitalio.Direction.INPUT
-        sleep_time = random.randrange(5, 15)
-        await asyncio.sleep(sleep_time)
+# Automate closing of testing zone
+# async def reset_pin_direction():
+#     while True:
+#         for _ in range(len(patrol)):
+#             tmp = patrol[_]
+#             tmp.pin.direction = digitalio.Direction.INPUT
+#         sleep_time = random.randrange(5, 15)
+#         await asyncio.sleep(sleep_time)
 
 
 # --- On Start Setup Tasks --- #
 
 # Set up MQTT for publish/subscribe
-# my_mqtt = local_mqtt.getMqtt(use_logger=True)
-# my_mqtt.configure_publish(pool)
-# my_mqtt.mqtt_client.on_message = message
-# my_mqtt.mqtt_client.on_connect = connected
-# my_mqtt.mqtt_client.on_disconnect = disconnected
+my_mqtt = local_mqtt.getMqtt(use_logger=True)
+my_mqtt.configure_publish(pool)
+my_mqtt.mqtt_client.on_message = message
+my_mqtt.mqtt_client.on_connect = connected
+my_mqtt.mqtt_client.on_disconnect = disconnected
 
 # Build Zone objects and append them to the patrol array
 patrol = zone.buildZones()  # use mqtt=True if using mqtt services
@@ -420,8 +425,8 @@ async def main():
         tmp.task = asyncio.create_task(catch_zone_changes(tmp.pinID, controls))
         task_array.append(tmp.task)
     # Listen for MQTT messages
-    # mqtt_listener_task = asyncio.create_task(mqtt_listener(controls))
-    # task_array.append(mqtt_listener_task)
+    mqtt_listener_task = asyncio.create_task(mqtt_listener(controls))
+    task_array.append(mqtt_listener_task)
     # If the siren is sounding turn it off after pre-defined period of time
     disable_siren_task = asyncio.create_task(dismiss_siren(controls, siren_controls))
     task_array.append(disable_siren_task)
@@ -429,12 +434,12 @@ async def main():
     maintain_watchdog_task = asyncio.create_task(maintain_watchdog())
     task_array.append(maintain_watchdog_task)
     # TEST STUFF
-    state_change_task = asyncio.create_task(change_zone_state())
-    task_array.append(state_change_task)
-    reset_pin_task = asyncio.create_task(reset_pin_direction())
-    task_array.append(reset_pin_task)
-    press_keys_task = asyncio.create_task(press_keys(siren_controls))
-    task_array.append(press_keys_task)
+    # state_change_task = asyncio.create_task(change_zone_state())
+    # task_array.append(state_change_task)
+    # reset_pin_task = asyncio.create_task(reset_pin_direction())
+    # task_array.append(reset_pin_task)
+    # press_keys_task = asyncio.create_task(press_keys(siren_controls))
+    # task_array.append(press_keys_task)
 
     for _ in range(len(task_array)):
         await asyncio.gather(task_array[_])
