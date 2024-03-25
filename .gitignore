@@ -12,3 +12,4 @@ bin/
 lib/
 .idea/
 circuitpy_helpers/
+/certs/mqtt.pem
