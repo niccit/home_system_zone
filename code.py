@@ -56,7 +56,7 @@ rtc = PCF8523(i2c)
 my_time = time_lord.configure_time(pool, rtc)
 
 # Logging
-my_log = logger.getLocalLogger(use_time=False)
+my_log = logger.getLocalLogger(use_time=True)
 if my_log is not None:
     my_log.log_message("Created logging singleton", "info")
 else:
@@ -67,9 +67,9 @@ my_mqtt = local_mqtt.getMqtt(pool, ssl_context, use_logger=True)
 
 # Watchdog
 watchdog_timeout = data["watchdog_timeout"]
-apollo = microcontroller.watchdog
-apollo.timeout = watchdog_timeout
-apollo.mode = watchdog.WatchDogMode.RAISE
+# apollo = microcontroller.watchdog
+# apollo.timeout = watchdog_timeout
+# apollo.mode = watchdog.WatchDogMode.RAISE
 
 # Colors for NeoPixel
 RED = 0xF00000
@@ -93,7 +93,7 @@ def connect_wifi():
     try:
         # wifi.radio.connect(os.getenv('CIRCUITPY_WIFI_SSID'), os.getenv('CIRCUITPY_WIFI_PASSWORD'))
         wifi.radio.connect(data["wifi_ssid"], data["wifi_password"])
-        my_log.log_message("connected to Wi-Fi Network " + str(wifi.radio.ap_info.ssid), "info")
+        my_log.log_message("Connected to Wi-Fi Network " + str(wifi.radio.ap_info.ssid), "info")
         my_mqtt.connect()
     except ConnectionError:
         my_log.log_message("Unable to connect to network", "critical")
@@ -101,7 +101,7 @@ def connect_wifi():
 
 
 # Signal the alarm system that motion has been detected
-# Wait for 1 second then return the pin to False
+# Wait for 4 second then return the pin to False
 def trip_zone(pin):
     if pin.value is False:
         pin.value = True
@@ -131,12 +131,7 @@ def connected(client, userdata, flags, rc):
 def disconnected(client, userdata, rc):
     log_message = "Disconnected from MQTT! Will try to reconnect"
     my_log.log_message(log_message, "warning")
-    time.sleep(5)
-    try:
-        if not my_mqtt.mqtt_client.is_connected():
-            my_mqtt.mqtt_client.connect()
-    except RuntimeError as r:
-        my_log.log_message("Error: " + str(r) + " Could not reconnect to MQTT, no longer listening", "warning")
+    my_mqtt.mqtt_client.connect()
 
 
 # Asynchronous Methods --- #
@@ -151,7 +146,7 @@ class Controls:
 # Listener for all subscribed MQTT feeds
 async def mqtt_listener(controls):
     while True:
-        my_mqtt.mqtt_client.loop(timeout=1.25)  # Listen to the subscribed feeds
+        my_mqtt.mqtt_client.loop(timeout=5)  # Listen to the subscribed feeds
         await asyncio.sleep(controls.wait)
 
 
@@ -193,8 +188,8 @@ async def main():
     mqtt_listener_task = asyncio.create_task(mqtt_listener(controls))
     task_array.append(mqtt_listener_task)
     # Feed the Watchdog
-    maintain_watchdog_task = asyncio.create_task(maintain_watchdog())
-    task_array.append(maintain_watchdog_task)
+    # maintain_watchdog_task = asyncio.create_task(maintain_watchdog())
+    # task_array.append(maintain_watchdog_task)
 
     for _ in range(len(task_array)):
         await asyncio.gather(task_array[_])
@@ -207,3 +202,4 @@ try:
 except watchdog.WatchDogTimeout as w:
     print("Error:", w)
     microcontroller.reset()
+
